@@ -70,8 +70,6 @@ delete-accountclaim-namespace: ## Delete account claim namespace
 
 .PHONY: create-accountclaim
 create-accountclaim: ## Create AccountClaim
-	# Create Account
-	test/integration/api/create_account.sh
 	# Create accountclaim
 	@oc process --local -p NAME=${ACCOUNT_CLAIM_NAME} -p NAMESPACE=${ACCOUNT_CLAIM_NAMESPACE} -f hack/templates/aws.managed.openshift.io_v1alpha1_accountclaim_cr.tmpl | oc apply -f -
 	# Wait for accountclaim to become ready
@@ -95,14 +93,11 @@ create-awsfederatedrole: ## Create awsFederatedRole "Read Only"
 delete-awsfederatedrole: ## Delete awsFederatedRole "Read Only"
 	# Delete Federated role
 	@oc delete -f deploy/crds/aws.managed.openshift.io_v1alpha1_awsfederatedrole_readonly_cr.yaml
-	# Delete Account
-	test/integration/api/delete_account.sh
-	# Delete Secrets
-	test/integration/api/delete_account_secrets.sh
+	$(MAKE) delete-account || true
 
 .PHONY: create-awsfederatedaccountaccess
 create-awsfederatedaccountaccess: check-aws-account-id-env ## Create awsFederatedAccountAccess - This uses a AWS Account ID from your environment
-	#create account access
+	# Create account access
 	test/integration/create_awsfederatedaccountaccess.sh --role read-only --name test-federated-user
 
 .PHONY: delete-awsfederatedaccountaccess
@@ -110,9 +105,7 @@ delete-awsfederatedaccountaccess: check-aws-account-id-env ## Delete awsFederate
 	test/integration/delete_awsfederatedaccountaccess.sh --role read-only --name test-federated-user
 
 .PHONY: test-awsfederatedrole
-test-awsfederatedrole: check-aws-account-id-env ## Test Federated Access Roles
-	# Create Account if not already created
-	test/integration/api/create_account.sh
+test-awsfederatedrole: check-aws-account-id-env create-account ## Test Federated Access Roles
 	# Create Federated Roles if not created
 	@oc apply -f deploy/crds/aws.managed.openshift.io_v1alpha1_awsfederatedrole_readonly_cr.yaml
 	@oc apply -f deploy/crds/aws.managed.openshift.io_v1alpha1_awsfederatedrole_networkmgmt_cr.yaml
@@ -131,10 +124,7 @@ test-awsfederatedrole: check-aws-account-id-env ## Test Federated Access Roles
 	@oc delete awsfederatedrole -n aws-account-operator network-mgmt
 	# Delete read-only role
 	@oc delete awsfederatedrole -n aws-account-operator read-only
-	# Delete Account
-	test/integration/api/delete_account.sh
-	# Delete Secrets
-	test/integration/api/delete_account_secrets.sh
+	$(MAKE) delete-account || true
 
 .PHONY: test-switch-role
 test-switch-role: ## Test switch role
@@ -239,11 +229,7 @@ list-s3-bucket:  ## List S3 bucket
 	if [ $$BUCKETS == 0 ]; then echo "Reuse successfully complete"; else echo "Reuse failed"; exit 1; fi
 
 .PHONY: test-reuse
-test-reuse: check-aws-account-id-env create-accountclaim-namespace create-accountclaim create-s3-bucket delete-accountclaim delete-accountclaim-namespace list-s3-bucket  ## Test reuse
-	# Delete reuse account
-	test/integration/api/delete_account.sh
-	# Delete reuse account secrets
-	test/integration/api/delete_account_secrets.sh
+test-reuse: check-aws-account-id-env create-accountclaim-namespace create-account create-accountclaim create-s3-bucket delete-accountclaim delete-accountclaim-namespace list-s3-bucket delete-account ## Test reuse
 
 .PHONY: test-secrets
 test-secrets: ## Test secrets are what we expect them to be
@@ -256,11 +242,11 @@ deploy-aws-account-operator-credentials:  ## Deploy the operator secrets, CRDs a
 
 .PHONY: predeploy-aws-account-operator
 predeploy-aws-account-operator: ## Predeploy AWS Account Operator
-# Create aws-account-operator namespace
+	# Create aws-account-operator namespace
 	@oc get namespace ${NAMESPACE} && oc project ${NAMESPACE} || oc create namespace ${NAMESPACE}
-# Create aws-account-operator CRDs
+	# Create aws-account-operator CRDs
 	@ls deploy/crds/*crd.yaml | xargs -L1 oc apply -f
-# Create zero size account pool
+	# Create zero size account pool
 	@oc apply -f hack/files/aws.managed.openshift.io_v1alpha1_zero_size_accountpool.yaml
 
 .PHONY: predeploy
@@ -268,16 +254,16 @@ predeploy: predeploy-aws-account-operator deploy-aws-account-operator-credential
 
 .PHONY: deploy-local
 deploy-local: ## Deploy Operator locally
-	@FORCE_DEV_MODE=local operator-sdk run --local --namespace=$(OPERATOR_NAMESPACE)
+	@FORCE_DEV_MODE=local operator-sdk run --local --namespace=$(OPERATOR_NAMESPACE) --enable-delve
 
 .PHONY: deploy-cluster
 deploy-cluster: FORCE_DEV_MODE?=cluster
 deploy-cluster: isclean ## Deploy to cluster
-# Deploy things like service account, roles, etc.
+	# Deploy things like service account, roles, etc.
 # TODO(efried): Filtering out operator.yaml here is icky, but necessary so we can do the substitutions.
 #               Revisit when templating mentioned below is done.
 	@ls deploy/*.yaml | grep -v operator.yaml | xargs -L1 oc apply -f
-# Deploy the operator resource, using our dev image and the appropriate (or requested) dev mode
+	# Deploy the operator resource, using our dev image and the appropriate (or requested) dev mode
 # TODO(efried): template this, but without having to maintain an almost-copy of operator.yaml
 	@hack/scripts/edit_operator_yaml_for_dev.py $(OPERATOR_IMAGE_URI) "$(FORCE_DEV_MODE)" | oc apply -f -
 
@@ -292,16 +278,16 @@ endif
 
 .PHONY: create-ou-map
 create-ou-map: ## Test apply OU map CR
-# Create OU map
+	# Create OU map
 	@oc process --local -p ROOT=${OSD_STAGING_1_OU_ROOT_ID} -p BASE=${OSD_STAGING_1_OU_BASE_ID} -p ACCOUNTLIMIT="0" -f hack/templates/aws.managed.openshift.io_v1alpha1_configmap.tmpl | oc apply -f -
 
 .PHONY: delete-ou-map
 delete-ou-map: ## Test delete OU map CR
-# Delete OU map
+	# Delete OU map
 	@oc process --local -p ROOT=${OSD_STAGING_1_OU_ROOT_ID} -p BASE=${OSD_STAGING_1_OU_BASE_ID} -f hack/templates/aws.managed.openshift.io_v1alpha1_configmap.tmpl | oc delete -f -
 
 .PHONY: test-aws-ou-logic
-test-aws-ou-logic: check-ou-mapping-configmap-env create-accountclaim-namespace create-accountclaim ## Test AWS OU logic
+test-aws-ou-logic: check-ou-mapping-configmap-env create-accountclaim-namespace create-account create-accountclaim ## Test AWS OU logic
 	# Check that account was moved correctly
 	@sleep 2; TYPE=$$(aws organizations list-parents --child-id ${OSD_STAGING_1_AWS_ACCOUNT_ID} --profile osd-staging-1 | jq -r ".Parents[0].Type"); if [ "$$TYPE" == "ORGANIZATIONAL_UNIT" ]; then echo "Account move successfully"; exit 0; elif [ "$$TYPE" == "ROOT" ]; then echo "Failed to move account out of root"; exit 1; fi;
 	@aws organizations list-parents --child-id ${OSD_STAGING_1_AWS_ACCOUNT_ID} --profile osd-staging-1
@@ -310,7 +296,7 @@ test-aws-ou-logic: check-ou-mapping-configmap-env create-accountclaim-namespace 
 	@echo "Successfully moved account back and deleted the test OU"
 
 .PHONY: test-all
-test-all: lint clean-operator test test-account-creation test-ccs test-reuse  test-awsfederatedaccountaccess test-awsfederatedrole test-aws-ou-logic  ## Test all
+test-all: lint clean-operator test test-account-creation test-ccs test-reuse test-awsfederatedaccountaccess test-awsfederatedrole test-aws-ou-logic  ## Test all
 
 .PHONY: clean-operator
 clean-operator: ## Clean Operator
